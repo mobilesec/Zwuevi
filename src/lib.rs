@@ -303,7 +303,7 @@ impl Connection {
                 queue
                     .send(data)
                     .await
-                    .expect("Could not send data from the event loop"); // FIXME: ok?
+                    .expect("Could not send data to the event queue");
             }
         }
     }
