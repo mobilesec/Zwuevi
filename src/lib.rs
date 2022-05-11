@@ -12,7 +12,6 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
 const TOR_PORT_CONTROL: u16 = 9051;
-const MAX_SINGLE_RECV_BYTES: usize = 1024 * 1024 * 1; // 1MB
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AsyncEventKind {
@@ -284,8 +283,10 @@ impl Connection {
                 if let Some(event_handler) = *event_handler.lock().await {
                     let result = match data {
                         Ok((_, mut data)) => {
-                            let first_line = data.pop().unwrap();
-                            let (event, line) = first_line.split_once(' ').unwrap();
+                            let first_line = data.pop().unwrap_or_default();
+                            let (event, line) = first_line
+                                .split_once(' ')
+                                .unwrap_or(("INVALID EVENT PARSE", ""));
                             let event = event.to_owned();
                             let mut lines = vec![line.to_owned()];
                             lines.extend(data.into_iter());
@@ -424,7 +425,8 @@ impl Zwuevi {
         listeners: I,
         flags: Option<Vec<&str>>,
     ) -> Result<String, Error> {
-        let sk = ed25519_dalek::SecretKey::from_bytes(secret_key).unwrap();
+        let sk = ed25519_dalek::SecretKey::from_bytes(secret_key)
+            .map_err(|err| Error::new(ErrorKind::Other, err))?;
         let esk = ed25519_dalek::ExpandedSecretKey::from(&sk);
 
         let mut command = format!("ADD_ONION ED25519-V3:{} ", base64::encode(&esk.to_bytes()));
@@ -445,7 +447,10 @@ impl Zwuevi {
                 return Err(Error::new(ErrorKind::Unsupported, "Invalid listeners"));
             }
             service_listeners.insert(port);
-            let addr = address.to_socket_addrs().unwrap().next().unwrap();
+            let addr = address.to_socket_addrs()?.next().ok_or(Error::new(
+                ErrorKind::Other,
+                "Could not parse valid socket address",
+            ))?;
             command.push_str(&format!("Port={},{}", port, addr));
         }
 
