@@ -1,4 +1,4 @@
-use connection::Connection;
+use connection::{Connection, EventHandler};
 use misc::AsyncEventKind;
 use rand::thread_rng;
 use sha3::{Digest, Sha3_256};
@@ -28,12 +28,7 @@ impl Zwuevi {
         Ok(Self { connection })
     }
 
-    pub async fn new(
-        port: u16,
-        event_handler: Option<
-            &'static (dyn Fn(Result<(AsyncEventKind, Vec<String>), Error>) + Send + Sync),
-        >,
-    ) -> Result<Zwuevi, Error> {
+    pub async fn new(port: u16, event_handler: Option<EventHandler>) -> Result<Zwuevi, Error> {
         let mut connection = Connection::new(port, event_handler).await?;
 
         // authenticate
@@ -63,12 +58,7 @@ impl Zwuevi {
         Ok(())
     }
 
-    pub async fn set_event_handler(
-        &mut self,
-        event_handler: &'static (dyn Fn(Result<(AsyncEventKind, Vec<String>), Error>)
-                      + Send
-                      + Sync),
-    ) -> Result<(), Error> {
+    pub async fn set_event_handler(&mut self, event_handler: EventHandler) -> Result<(), Error> {
         self.connection.set_event_handler(event_handler).await
     }
 
@@ -119,10 +109,9 @@ impl Zwuevi {
                 return Err(Error::new(ErrorKind::Unsupported, "Invalid listeners"));
             }
             service_listeners.insert(port);
-            let addr = address.to_socket_addrs()?.next().ok_or(Error::new(
-                ErrorKind::Other,
-                "Could not parse valid socket address",
-            ))?;
+            let addr = address.to_socket_addrs()?.next().ok_or_else(|| {
+                Error::new(ErrorKind::Other, "Could not parse valid socket address")
+            })?;
             command.push_str(&format!("Port={},{}", port, addr));
         }
 

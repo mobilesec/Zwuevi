@@ -7,24 +7,21 @@ use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
+pub(crate) type EventHandler =
+    &'static (dyn Fn(Result<(AsyncEventKind, Vec<String>), Error>) + Send + Sync);
+
 pub(crate) struct Connection {
     sender: OwnedWriteHalf,
     //TODO event_handler needs to also handle errors like if there was some issues from the
     //tor-binary side! all errors should be handled via the event_handler
-    event_handler: Arc<
-        Mutex<
-            Option<&'static (dyn Fn(Result<(AsyncEventKind, Vec<String>), Error>) + Send + Sync)>,
-        >,
-    >,
+    event_handler: Arc<Mutex<Option<EventHandler>>>,
     event_receiver: tokio::sync::mpsc::Receiver<Result<(u16, Vec<String>), Error>>,
 }
 
 impl Connection {
     pub(crate) async fn new(
         port: u16,
-        event_handler: Option<
-            &'static (dyn Fn(Result<(AsyncEventKind, Vec<String>), Error>) + Send + Sync),
-        >,
+        event_handler: Option<EventHandler>,
     ) -> Result<Connection, Error> {
         let stream = TcpStream::connect(&format!("127.0.0.1:{}", port)).await?;
         let (rx, sender) = stream.into_split();
@@ -86,13 +83,7 @@ impl Connection {
     async fn event_loop(
         mut rx: OwnedReadHalf,
         queue: tokio::sync::mpsc::Sender<Result<(u16, Vec<String>), Error>>,
-        event_handler: Arc<
-            Mutex<
-                Option<
-                    &'static (dyn Fn(Result<(AsyncEventKind, Vec<String>), Error>) + Send + Sync),
-                >,
-            >,
-        >,
+        event_handler: Arc<Mutex<Option<EventHandler>>>,
     ) {
         loop {
             let mut response_code;
@@ -245,9 +236,7 @@ impl Connection {
 
     pub(crate) async fn set_event_handler(
         &mut self,
-        event_handler: &'static (dyn Fn(Result<(AsyncEventKind, Vec<String>), Error>)
-                      + Send
-                      + Sync),
+        event_handler: EventHandler,
     ) -> Result<(), Error> {
         let mut handler = self.event_handler.lock().await;
         handler.replace(event_handler);
