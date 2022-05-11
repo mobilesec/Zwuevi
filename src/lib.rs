@@ -91,15 +91,20 @@ struct Connection {
     sender: OwnedWriteHalf,
     //TODO event_handler needs to also handle errors like if there was some issues from the
     //tor-binary side! all errors should be handled via the event_handler
-    event_handler:
-        Arc<Mutex<Option<&'static (dyn Fn((AsyncEventKind, Vec<String>)) + Send + Sync)>>>,
+    event_handler: Arc<
+        Mutex<
+            Option<&'static (dyn Fn(Result<(AsyncEventKind, Vec<String>), Error>) + Send + Sync)>,
+        >,
+    >,
     event_receiver: tokio::sync::mpsc::Receiver<Result<(u16, Vec<String>), Error>>,
 }
 
 impl Connection {
     async fn new(
         port: u16,
-        event_handler: Option<&'static (dyn Fn((AsyncEventKind, Vec<String>)) + Send + Sync)>,
+        event_handler: Option<
+            &'static (dyn Fn(Result<(AsyncEventKind, Vec<String>), Error>) + Send + Sync),
+        >,
     ) -> Result<Connection, Error> {
         let stream = TcpStream::connect(&format!("127.0.0.1:{}", port)).await?;
         let (rx, sender) = stream.into_split();
@@ -132,184 +137,173 @@ impl Connection {
         Ok(())
     }
 
+    async fn read_until(rx: &mut OwnedReadHalf, pattern: &[u8]) -> Result<String, Error> {
+        let mut line = Vec::new();
+        let mut byte = [0u8; 1];
+        let length = pattern.len();
+
+        loop {
+            rx.read_exact(&mut byte).await?;
+            line.push(byte[0]);
+
+            let l = line.len();
+            if l >= length && line[l - length..] == pattern[..] {
+                line.truncate(l - length);
+                let line = String::from_utf8(line)
+                    .map_err(|err| Error::new(ErrorKind::InvalidData, err))?;
+                return Ok(line);
+            }
+        }
+    }
+
+    async fn clean_line(rx: &mut OwnedReadHalf) -> String {
+        match Self::read_until(rx, b"\r\n").await {
+            Ok(line) => line,
+            Err(err) => format!("not parsable: {}", err),
+        }
+    }
+
     async fn event_loop(
         mut rx: OwnedReadHalf,
         queue: tokio::sync::mpsc::Sender<Result<(u16, Vec<String>), Error>>,
         event_handler: Arc<
-            Mutex<Option<&'static (dyn Fn((AsyncEventKind, Vec<String>)) + Send + Sync)>>,
+            Mutex<
+                Option<
+                    &'static (dyn Fn(Result<(AsyncEventKind, Vec<String>), Error>) + Send + Sync),
+                >,
+            >,
         >,
     ) {
         loop {
+            let mut response_code;
             let mut lines = Vec::new();
-            let mut response_code = None;
 
-            let mut state = 0;
-
-            let mut current_line_buffer = Vec::new();
-            let mut bytes_read = 0;
-            let mut char_buffer = [0u8; 1];
-
-            loop {
-                if bytes_read >= MAX_SINGLE_RECV_BYTES {
-                    // FIXME: need to empty all bytes from queue?
-                    eprintln!("More data sent as allowed: DoS / OOM protection");
-                    break;
-                }
-                let b = {
-                    if let Err(err) = rx.read_exact(&mut char_buffer[..]).await {
-                        eprintln!("read error: {}", err);
-                        break;
+            let data = 'lines: loop {
+                // read the 3 digit response code
+                // if we do not get a valid response code, we dont care about the line because we
+                // would not know what we do with it (response or event?)
+                let mut raw_response_code = [0u8; 3];
+                if let Err(err) = rx.read_exact(&mut raw_response_code).await {
+                    if err.kind().eq(&ErrorKind::UnexpectedEof) {
+                        return;
                     }
-                    char_buffer[0]
+
+                    let line = Self::clean_line(&mut rx).await;
+                    eprintln!(
+                        "Could not read valid response code (raw: {:?}): {} [{}]",
+                        raw_response_code, err, line
+                    );
+                    continue 'lines;
+                }
+
+                let raw = match String::from_utf8(raw_response_code.into()) {
+                    Ok(raw) => raw,
+                    Err(err) => {
+                        let line = Self::clean_line(&mut rx).await;
+                        eprintln!(
+                            "Could not parse valid utf8 from response code (raw: {:?}): {} [{}]",
+                            raw_response_code, err, line
+                        );
+                        continue 'lines;
+                    }
                 };
 
-                bytes_read += 1;
-
-                // is this check valid?
-                // is all data valid ascii?
-                if !b.is_ascii() {
-                    eprintln!("Non ASCII character");
-                    break;
+                match u16::from_str(&raw) {
+                    Ok(response) => response_code = response,
+                    Err(err) => {
+                        let line = Self::clean_line(&mut rx).await;
+                        eprintln!(
+                            "Could not parse valid response code (raw: {:?}): {} [{}]",
+                            raw, err, line
+                        );
+                        continue 'lines;
+                    }
                 }
 
-                if state == 0 {
-                    if !b.is_ascii_digit() {
-                        eprintln!("Invalid character");
-                        break;
-                    }
-                    current_line_buffer.push(b);
+                // get next character to determine further process
+                let mut byte = [0u8; 1];
+                if let Err(err) = rx.read_exact(&mut byte).await {
+                    let line = Self::clean_line(&mut rx).await;
+                    break 'lines Err(Error::new(
+                        ErrorKind::Other,
+                        format!("Cant read the line mode we are in: {} [{}]", err, line),
+                    ));
+                }
 
-                    // we found response code!
-                    if current_line_buffer.len() == 3 {
-                        let text = std::str::from_utf8(&current_line_buffer)
-                            .map_err(|err| Error::new(ErrorKind::InvalidData, err))
-                            .unwrap(); //FIXME
-                        let parsed_response_code = u16::from_str(text)
-                            .map_err(|err| Error::new(ErrorKind::InvalidData, err))
-                            .unwrap(); //FIXME
-
-                        // some fancy behaviour of from str may occur(?)
-                        // let's leave this assert even for prod use
-                        assert!(parsed_response_code < 1000, "Invalid response code");
-
-                        if let Some(response_code) = response_code {
-                            if response_code != parsed_response_code {
-                                eprintln!("Response code mismatch");
-                                break;
+                match byte[0] {
+                    b' ' | b'-' => {
+                        // ' ': last line - read until end
+                        // '-': one of multiple - read line and continue
+                        let line = match Self::read_until(&mut rx, b"\r\n").await {
+                            Ok(line) => line,
+                            Err(err) => {
+                                let line = Self::clean_line(&mut rx).await;
+                                break 'lines Err(Error::new(
+                                    ErrorKind::Other,
+                                    format!("Cant read the this line: {} [{}]", err, line),
+                                ));
                             }
-                        } else {
-                            response_code = Some(parsed_response_code);
-                        }
-                        state = 1;
-                        current_line_buffer.clear();
-                    }
-                } else if state == 1 {
-                    debug_assert!(current_line_buffer.is_empty());
-                    debug_assert!(response_code.is_some());
-                    match b {
-                        // last line
-                        b' ' => {
-                            state = 2;
-                        }
-                        // some of many lines
-                        b'-' => {
-                            state = 3;
-                        }
-                        // multiline mode trigger
-                        b'+' => {
-                            state = 4;
-                        }
-                        // other characters are not allowed
-                        _ => {
-                            eprintln!("Found invalid character");
-                            break;
-                        }
-                    }
-                } else if state == 2 || state == 3 {
-                    // as the docs says:
-                    // Tor, however, MUST NOT generate LF instead of CRLF.
-                    current_line_buffer.push(b);
-                    let length = current_line_buffer.len();
-                    if length >= 2 && current_line_buffer[length - 2..] == b"\r\n"[..] {
-                        current_line_buffer.truncate(length - 2);
-
-                        let res = {
-                            let mut line_buffer = Vec::new();
-                            std::mem::swap(&mut current_line_buffer, &mut line_buffer);
-                            String::from_utf8(line_buffer)
-                        };
-                        // only valid ascii remember?
-                        // if so it's valid utf8
-                        debug_assert!(res.is_ok());
-                        let text = res
-                            .map_err(|err| Error::new(ErrorKind::InvalidData, err))
-                            .unwrap(); //FIXME
-                        lines.push(text);
-
-                        // if it's last line break loop
-                        if state == 2 {
-                            break;
-                        } else {
-                            state = 0;
-                        }
-                    }
-                } else if state == 4 {
-                    // multiline read mode reads lines until it eventually found \r\n.\r\n sequence
-                    current_line_buffer.push(b);
-                    let length = current_line_buffer.len();
-                    if length >= 5 && current_line_buffer[length - 5..] == b"\r\n.\r\n"[..] {
-                        current_line_buffer.truncate(length - 5);
-
-                        let res = {
-                            let mut line_buffer = Vec::new();
-                            std::mem::swap(&mut current_line_buffer, &mut line_buffer);
-                            String::from_utf8(line_buffer)
                         };
 
-                        // only valid ascii remember?
-                        // if so it's valid utf8
-                        debug_assert!(res.is_ok());
-                        let text = res
-                            .map_err(|err| Error::new(ErrorKind::InvalidData, err))
-                            .unwrap(); // FIXME
-                        lines.push(text);
+                        lines.push(line);
 
-                        // there may be more lines incoming after this one
-                        state = 0;
+                        if byte[0] == b' ' {
+                            break 'lines Ok((response_code, lines)); // found end of last line
+                        } else {
+                            continue 'lines; // resume with more lines
+                        }
                     }
-                } else {
-                    unreachable!("Invalid state!");
-                }
-            }
-            let response_code = match response_code {
-                Some(response_code) => response_code,
-                None => {
-                    eprintln!("Invalid format");
-                    break;
+                    b'+' => {
+                        // multiline mode
+                        let multiline = match Self::read_until(&mut rx, b"\r\n.\r\n").await {
+                            Ok(line) => line,
+                            Err(err) => {
+                                let line = Self::clean_line(&mut rx).await;
+                                break 'lines Err(Error::new(
+                                    ErrorKind::Other,
+                                    format!("Cant read the this multiline: {} [{}]", err, line),
+                                ));
+                            }
+                        };
+
+                        lines.push(multiline);
+                        continue 'lines; // resume with more lines
+                    }
+                    mode => {
+                        let line = Self::clean_line(&mut rx).await;
+                        break 'lines Err(Error::new(
+                            ErrorKind::Other,
+                            format!("Unsupported mode: {} [{}]", mode, line),
+                        ));
+                    }
                 }
             };
 
             // check if its an async event
             if response_code == 650 {
                 if let Some(event_handler) = *event_handler.lock().await {
-                    let first_line = lines.pop().unwrap();
-                    let (event, data) = first_line.split_once(' ').unwrap();
-                    let event = event.to_owned();
-                    let mut data = vec![data.to_owned()];
-                    data.extend(lines.into_iter());
+                    let result = match data {
+                        Ok((_, mut data)) => {
+                            let first_line = data.pop().unwrap();
+                            let (event, line) = first_line.split_once(' ').unwrap();
+                            let event = event.to_owned();
+                            let mut lines = vec![line.to_owned()];
+                            lines.extend(data.into_iter());
+
+                            Ok((AsyncEventKind::from(event.as_str()), lines))
+                        }
+                        Err(err) => Err(err),
+                    };
 
                     // make event handler call async
-                    tokio::spawn(async move {
-                        (*event_handler)((AsyncEventKind::from(event.as_str()), data))
-                    });
+                    tokio::spawn(async move { (*event_handler)(result) });
                 }
-                continue;
+            } else {
+                queue
+                    .send(data)
+                    .await
+                    .expect("Could not send data from the event loop"); // FIXME: ok?
             }
-
-            queue
-                .send(Ok((response_code, lines)))
-                .await
-                .expect("Could not send data from the event loop"); // FIXME: ok?
         }
     }
 
@@ -329,7 +323,9 @@ impl Connection {
 
     async fn set_event_handler(
         &mut self,
-        event_handler: &'static (dyn Fn((AsyncEventKind, Vec<String>)) + Send + Sync),
+        event_handler: &'static (dyn Fn(Result<(AsyncEventKind, Vec<String>), Error>)
+                      + Send
+                      + Sync),
     ) -> Result<(), Error> {
         let mut handler = self.event_handler.lock().await;
         handler.replace(event_handler);
@@ -361,7 +357,9 @@ impl Zwuevi {
 
     pub async fn new(
         port: u16,
-        event_handler: Option<&'static (dyn Fn((AsyncEventKind, Vec<String>)) + Send + Sync)>,
+        event_handler: Option<
+            &'static (dyn Fn(Result<(AsyncEventKind, Vec<String>), Error>) + Send + Sync),
+        >,
     ) -> Result<Zwuevi, Error> {
         let mut connection = Connection::new(port, event_handler).await?;
 
@@ -394,7 +392,9 @@ impl Zwuevi {
 
     pub async fn set_event_handler(
         &mut self,
-        event_handler: &'static (dyn Fn((AsyncEventKind, Vec<String>)) + Send + Sync),
+        event_handler: &'static (dyn Fn(Result<(AsyncEventKind, Vec<String>), Error>)
+                      + Send
+                      + Sync),
     ) -> Result<(), Error> {
         self.connection.set_event_handler(event_handler).await
     }
@@ -403,19 +403,19 @@ impl Zwuevi {
         self.connection.remove_event_handler().await
     }
 
-    pub async fn raw_command(&mut self, raw: &str) -> Result<(), Error> {
+    pub async fn raw_command(&mut self, raw: &str) -> Result<Vec<String>, Error> {
         self.connection
             .write(format!("{}\r\n", raw).as_bytes())
             .await?;
 
-        let (code, _) = self.connection.receive().await?;
+        let (code, data) = self.connection.receive().await?;
         if code != 250 {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 format!("Invalid response code: {}", code),
             ));
         }
-        Ok(())
+        Ok(data)
     }
 
     pub async fn add_onion_v3<S: ToSocketAddrs, I: IntoIterator<Item = (u16, S)>>(
@@ -595,7 +595,8 @@ mod tests {
         rt.block_on(async move {
             let mut zwuevi = Zwuevi::new(
                 9051,
-                Some(&|(event, _)| {
+                Some(&|result| {
+                    let (event, _) = result.unwrap();
                     assert_eq!(event, AsyncEventKind::LogMessagesInfo);
                 }),
             )
@@ -618,7 +619,8 @@ mod tests {
         rt.block_on(async move {
             let mut zwuevi = Zwuevi::new(
                 9051,
-                Some(&|(event, _)| {
+                Some(&|result| {
+                    let (event, _) = result.unwrap();
                     assert_eq!(event, AsyncEventKind::LogMessagesDebug);
                 }),
             )
@@ -712,12 +714,26 @@ mod tests {
                 .unwrap();
 
             zwuevi
-                .set_event_handler(&|(event, _)| {
+                .set_event_handler(&|result| {
+                    let (event, _) = result.unwrap();
                     assert_eq!(AsyncEventKind::LogMessagesDebug, event)
                 })
                 .await
                 .unwrap();
             create_logs(&mut zwuevi).await;
+        });
+    }
+
+    #[test]
+    fn get_info_version() {
+        let rt = Runtime::new().unwrap();
+
+        // block until finished
+        rt.block_on(async move {
+            let mut zwuevi = Zwuevi::default().await.unwrap();
+            let response = zwuevi.raw_command("GETINFO version").await.unwrap();
+
+            assert!(response.iter().any(|line| line.contains("version")))
         });
     }
 }
