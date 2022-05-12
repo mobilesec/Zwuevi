@@ -7,18 +7,19 @@ use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
+// Representation of an event handler for async events
 pub(crate) type EventHandler =
     &'static (dyn Fn(Result<(AsyncEventKind, Vec<String>), Error>) + Send + Sync);
 
+// Handling the async events, send and receive return value of commands
 pub(crate) struct Connection {
     sender: OwnedWriteHalf,
-    //TODO event_handler needs to also handle errors like if there was some issues from the
-    //tor-binary side! all errors should be handled via the event_handler
     event_handler: Arc<Mutex<Option<EventHandler>>>,
     event_receiver: tokio::sync::mpsc::Receiver<Result<(u16, Vec<String>), Error>>,
 }
 
 impl Connection {
+    // Create a new connection to the TOR control socket
     pub(crate) async fn new(
         port: u16,
         event_handler: Option<EventHandler>,
@@ -40,6 +41,7 @@ impl Connection {
         })
     }
 
+    // Authenticate with the simplest authentication command
     pub(crate) async fn authenticate(&mut self) -> Result<(), Error> {
         self.write(b"AUTHENTICATE\r\n").await?;
         let (code, _) = self.receive().await?;
@@ -54,6 +56,7 @@ impl Connection {
         Ok(())
     }
 
+    // Read from the socket until the provided `pattern`
     async fn read_until(rx: &mut OwnedReadHalf, pattern: &[u8]) -> Result<String, Error> {
         let mut line = Vec::new();
         let mut byte = [0u8; 1];
@@ -73,6 +76,7 @@ impl Connection {
         }
     }
 
+    // Remove a complete line - used to clean if an error occurs
     async fn clean_line(rx: &mut OwnedReadHalf) -> String {
         match Self::read_until(rx, b"\r\n").await {
             Ok(line) => line,
@@ -80,6 +84,7 @@ impl Connection {
         }
     }
 
+    // The event loop that is handling async events as well as responses on commands sent
     async fn event_loop(
         mut rx: OwnedReadHalf,
         queue: tokio::sync::mpsc::Sender<Result<(u16, Vec<String>), Error>>,
@@ -220,6 +225,7 @@ impl Connection {
         }
     }
 
+    // Recieve a response from the TOR controller after a command was pushed
     pub(crate) async fn receive(&mut self) -> Result<(u16, Vec<String>), Error> {
         match self.event_receiver.recv().await {
             Some(result) => result,
@@ -227,6 +233,7 @@ impl Connection {
         }
     }
 
+    // Send a command to the TOR controller
     pub(crate) async fn write(&mut self, data: &[u8]) -> Result<(), Error> {
         self.sender.write_all(data).await?;
         self.sender.flush().await?;
@@ -234,6 +241,7 @@ impl Connection {
         Ok(())
     }
 
+    // Set a new event handler
     pub(crate) async fn set_event_handler(
         &mut self,
         event_handler: EventHandler,
@@ -244,6 +252,7 @@ impl Connection {
         Ok(())
     }
 
+    // Remove an existing event handler
     pub(crate) async fn remove_event_handler(&mut self) -> Result<(), Error> {
         let mut handler = self.event_handler.lock().await;
         let _ = handler.take();

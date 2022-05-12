@@ -1,5 +1,8 @@
 use std::fmt::Display;
 
+/// Available async events
+///
+/// All async events this library supports.
 #[derive(Debug, PartialEq, Eq)]
 pub enum AsyncEventKind {
     CircuitStatusChanged,

@@ -3,6 +3,13 @@ name = "zwuevi"
 version = "0.1.0"
 edition = "2021"
 
+[[example]]
+name = "hello-onion"
+path = "examples/hello_onion/src/main.rs"
+
+[[example]]
+name = "debug-events"
+path = "examples/debug_events/src/main.rs"
 
 [dependencies]
 sha3 = "^0.10"
