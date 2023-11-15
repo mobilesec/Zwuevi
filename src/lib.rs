@@ -33,6 +33,7 @@ impl Zwuevi {
 
         // authenticate
         connection.authenticate().await?;
+        connection.wait_until_ready().await?;
 
         Ok(Self { connection })
     }

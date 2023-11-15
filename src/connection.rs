@@ -259,4 +259,27 @@ impl Connection {
 
         Ok(())
     }
+
+    // Wait until Tor is connected.
+    pub(crate) async fn wait_until_ready(&mut self) -> Result<(), Error> {
+        loop {
+            self.write(b"GETINFO status/circuit-established\r\n")
+                .await?;
+            let (code, value) = self.receive().await?;
+
+            if code != 250 {
+                return Err(Error::new(
+                    ErrorKind::Unsupported,
+                    format!("Invalid response code: {}", code),
+                ));
+            }
+
+            // check status
+            if value.contains(&String::from("status/circuit-established=1")) {
+                return Ok(());
+            }
+
+            tokio::time::sleep(core::time::Duration::from_secs(1)).await;
+        }
+    }
 }

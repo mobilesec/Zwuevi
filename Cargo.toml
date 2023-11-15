@@ -11,6 +11,10 @@ path = "examples/hello_onion/src/main.rs"
 name = "debug-events"
 path = "examples/debug_events/src/main.rs"
 
+[[example]]
+name = "collection"
+path = "examples/collection/src/main.rs"
+
 [dependencies]
 sha3 = "^0.10"
 rand = "^0.7"
@@ -20,4 +24,7 @@ ed25519-dalek = "1.0.1"
 tokio = { version = "^1", features = ["rt-multi-thread", "io-util", "macros", "sync", "time", "net"] }
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
+
+[dev-dependencies]
+ureq = { version  = "2.2.0", features = ["json", "socks-proxy"]}
 
