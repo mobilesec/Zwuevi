@@ -26,8 +26,8 @@ pub struct Zwuevi {
 impl Zwuevi {
     /// Create a new control connection to the default TOR control port `9051`
     ///
-    /// This will return an error if there cannot be established a connection to the TOR control
-    /// port.
+    /// After successful connection to the control port, it will wait until TOR is ready.
+    /// Returns an error if there cannot be established a connection to the TOR control port.
     pub async fn default() -> Result<Zwuevi, Error> {
         let mut connection = Connection::new(TOR_PORT_CONTROL, None).await?;
 
