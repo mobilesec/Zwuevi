@@ -329,7 +329,7 @@ impl Zwuevi {
 
     /// Generate a new onion service key
     ///
-    /// Return a freah secret key for a new onion service.
+    /// Return a fresh secret key for a new onion service.
     pub fn generate_key() -> [u8; 32] {
         let sk = ed25519_dalek::SecretKey::generate(&mut thread_rng());
         sk.to_bytes()
