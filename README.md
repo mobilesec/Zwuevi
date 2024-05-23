@@ -1,4 +1,4 @@
-# Zwuevi
+# Tor Controller Library in Rust
 Provides a library to communicate with the TOR control socket.
 Integrates an async event handler running in a separate task.
 
@@ -21,3 +21,15 @@ Some of the functions do have an example on how to call them.
 ## Examples
 There are also simple examples to show how to use the library under the directory `examples`.
 Use `cargo r --example <name>` to run one of them.
+
+## Acknowledgements
+
+This work has been carried out within the scope of Digidow, the Christian Doppler Laboratory for Private Digital Authentication in the Physical World. We gratefully acknowledge financial support by the Austrian Federal Ministry of Labour and Economy, the National Foundation for Research, Technology and Development, the Christian Doppler Research Association, 3 Banken IT GmbH, ekey biometric systems GmbH, Kepler Universitätsklinikum GmbH, NXP Semiconductors Austria GmbH & Co KG, and Österreichische Staatsdruckerei GmbH.
+
+## LICENSE
+
+Licensed under the EUPL, Version 1.2 or – as soon they will be approved by
+the European Commission - subsequent versions of the EUPL (the "Licence").
+You may not use this work except in compliance with the Licence.
+
+**License**: [European Union Public License v1.2](https://joinup.ec.europa.eu/software/page/eupl)
