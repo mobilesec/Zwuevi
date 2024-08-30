@@ -1,6 +1,6 @@
 # Tor Controller Library in Rust
-Provides a library to communicate with the TOR control socket.
-Integrates an async event handler running in a separate task.
+Provides a library to communicate with the Tor control socket to generate ephemeral onion services.
+Integrates an async event handler running in a separate task which is handling control events.
 
 ## Features
  - [x] Async event handler
@@ -11,12 +11,11 @@ Integrates an async event handler running in a separate task.
  - [x] Sending raw commands
  - [x] Generating public keys from secret keys
  - [x] Generating onion address from public keys
- - [ ] Rescheduling onion services
 
 ## Documentation
 The current state is well documented in the code.
-With the command `cargo doc --open` you can create and open it.
-Some of the functions do have an example on how to call them.
+With the command `cargo doc --open` you can create and open the documentation.
+Some of the functions do have an example on how to use it.
 
 ## Examples
 There are also simple examples to show how to use the library under the directory `examples`.

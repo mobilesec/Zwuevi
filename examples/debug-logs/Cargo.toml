@@ -1,9 +1,9 @@
 [package]
-name = "hello_onion"
+name = "debug_events"
 version = "0.1.0"
 edition = "2021"
 
 
 [dependencies]
 zwuevi = { version = "0.1", path = "../../" }
-tokio = { version = "^1", features = ["rt-multi-thread", "macros", "net"] }
+tokio = { version = "^1", features = ["macros"] }
