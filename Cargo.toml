@@ -4,27 +4,18 @@ version = "0.1.0"
 edition = "2021"
 
 [[example]]
-name = "hello-onion"
-path = "examples/hello_onion/src/main.rs"
+name = "echo-onion"
+path = "examples/echo-onion/src/main.rs"
 
 [[example]]
-name = "debug-events"
-path = "examples/debug_events/src/main.rs"
-
-[[example]]
-name = "collection"
-path = "examples/collection/src/main.rs"
+name = "debug-logs"
+path = "examples/debug-logs/src/main.rs"
 
 [dependencies]
-sha3 = "^0.10"
-rand = "^0.7"
-base32 = "0.4.0"
-base64 = "0.13.0"
-ed25519-dalek = "1.0.1"
+sha3 = "~0.10"
+rand = "~0.8"
+base32 = "~0.5"
+base64 = "~0.22"
+ed25519-dalek = { version = "~2", features = ["hazmat", "rand_core"] }
 tokio = { version = "^1", features = ["rt-multi-thread", "io-util", "macros", "sync", "time", "net"] }
-serde = { version = "1.0", features = ["derive", "rc"] }
-serde_json = "1.0"
-
-[dev-dependencies]
-ureq = { version  = "2.2.0", features = ["json", "socks-proxy"]}
-
+log = "~0.4"
