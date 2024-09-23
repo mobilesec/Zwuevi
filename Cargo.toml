@@ -2,6 +2,13 @@
 name = "zwuevi"
 version = "0.1.0"
 edition = "2021"
+description = "Library to communicate with the Tor control socket to generate ephemeral onion services"
+readme = "README.md"
+repository = "https://github.com/"
+license = "EUPL-v1.2"
+license-file = "LICENSE"
+keywords = ["privacy", "network", "tor", "onion"]
+categories = ["network-programming", "asynchronous", "cryptography"]
 
 [[example]]
 name = "echo-onion"
