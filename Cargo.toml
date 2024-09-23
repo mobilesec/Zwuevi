@@ -5,8 +5,7 @@ edition = "2021"
 description = "Library to communicate with the Tor control socket to generate ephemeral onion services"
 readme = "README.md"
 repository = "https://github.com/"
-license = "EUPL-v1.2"
-license-file = "LICENSE"
+license = "EUPL-1.2"
 keywords = ["privacy", "network", "tor", "onion"]
 categories = ["network-programming", "asynchronous", "cryptography"]
 
