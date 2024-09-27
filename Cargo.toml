@@ -1,6 +1,6 @@
 [package]
 name = "zwuevi"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Library to communicate with the Tor control socket to generate ephemeral onion services"
 readme = "README.md"
